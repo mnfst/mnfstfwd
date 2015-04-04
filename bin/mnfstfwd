@@ -1,0 +1,129 @@
+#!/usr/bin/env ruby
+
+SERVER = 'localhost'
+PORT = '7000'
+USE_SSL = false
+KEYSERVER_URL = "http://pool.sks-keyservers.net:11371"
+
+require 'bundler/setup' # bundler
+require 'hkp'           # gpgme
+require 'mail'          # mail
+
+# Take a raw email on stdin
+email = Mail.new($stdin.read)
+
+def main(email)
+  if email.errors.any?
+    exit 1
+  end
+
+  sender = email.from && email.from.first
+
+  if sender.nil?
+    exit 1
+  end
+
+  # Split out the signature and text
+  #  - Err: no signature.asc
+  #  - Err: no text
+  signature = email.attachments['signature.asc'].body.to_s
+  if signature.nil?
+    error sender, "Must attach signature.asc"
+  end
+
+  text = email.parts[0].raw_source.sub(/\A\r\n/,'')
+  if text.nil?
+    error sender, "Must send us content"
+  end
+
+  # Verify it
+  #  - Err: verification failed
+  err_msg = verify(signature, text)
+  if err_msg
+    error sender, err_msg
+  end
+
+  # Construct this JSON:
+  #   {"status":{"body":#{raw_body},"signature":#{signature}}}
+  json = <<-JSON
+  {"status":{"body":#{text.to_json},"signature":#{signature.to_json}}}
+  JSON
+
+  # POST it to https://www.mnfst.io/statuses
+  #  - Err: result not 2xx
+  response = Net::HTTP.start(SERVER, PORT, use_ssl: USE_SSL) do |http|
+    http.post('/statuses', json, 'Content-Type' => 'application/json')
+  end
+
+  case response
+  when Net::HTTPSuccess
+    # Reply with the value of the Location header
+    #  - Err: no Location header
+    url = response['Location']
+    if url.nil?
+      error sender, "The server did not tell us the URL"
+    end
+    reply sender, "Your content has been posted to: #{url}"
+  else
+    error sender, response.message
+  end
+end
+
+def verify(signature, text, tries = 2)
+  sig = nil
+  crypto.verify(signature, signed_text: text) { |_sig| sig = _sig }
+  finalize_verification(sig, text, tries)
+end
+
+def finalize_verification(sig, text, tries)
+  case GPGME.gpgme_err_code(sig.status)
+  when GPGME::GPG_ERR_NO_ERROR
+    nil
+  when GPGME::GPG_ERR_NO_PUBKEY
+    if tries > 0
+      import_into_keyring(sig.fpr)
+      verify(sig, text, tries - 1)
+    else
+      "could not find public key for: #{sig.fpr}"
+    end
+  else
+    sig.to_s
+  end
+end
+
+def crypto
+  GPGME::Crypto.new
+end
+
+def import_into_keyring(fingerprint)
+  raw_pub_key = hkp.fetch(fingerprint)
+  GPGME::Key.import(raw_pub_key)
+end
+
+def hkp
+  Hkp.new(KEYSERVER_URL)
+end
+
+def error(recipient, msg)
+  mail = Mail.new do |mail|
+    from 'support@mnfst.io.'
+    to recipient
+    subject 'mnfst.io error'
+    body msg
+  end
+  mail.deliver
+
+  exit 1
+end
+
+def reply(recipient, msg)
+  mail = Mail.new do |mail|
+    from 'support@mnfst.io.'
+    to recipient
+    subject 'mnfst.io'
+    body msg
+  end
+  mail.deliver
+end
+
+main(email)
