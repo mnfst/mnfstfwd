@@ -13,6 +13,8 @@ require 'mail'          # mail
 email = Mail.new($stdin.read)
 
 def main(email)
+  set_gnupg_home
+
   if email.errors.any?
     exit 1
   end
@@ -98,7 +100,7 @@ def finalize_verification(sig, text, tries)
 end
 
 def crypto
-  GPGME::Crypto.new
+  @_cypto ||= GPGME::Crypto.new
 end
 
 def import_into_keyring(fingerprint)
@@ -130,6 +132,17 @@ def reply(recipient, msg)
     body msg
   end
   mail.deliver
+end
+
+def gnupg_home
+  ENV.fetch('MNFST_GNUPGHOME',
+    ENV.fetch('GNUPGHOME') {
+      File.join(ENV.fetch('HOME', '/'), '.gnupg')
+    })
+end
+
+def set_gnupg_home
+  GPGME::Engine.home_dir = gnupg_home
 end
 
 main(email)
