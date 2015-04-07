@@ -42,16 +42,14 @@ def main(email)
   if text_part.nil?
     error sender, "Must send us content"
   end
-  text_to_verify = text_part.raw_source.sub(/\A\r\n/,'')
+  text = text_part.raw_source.sub(/\A\r\n/,'')
 
   # Verify it
   #  - Err: verification failed
-  err_msg = verify(signature, text_to_verify)
+  err_msg = verify(signature, text)
   if err_msg
     error sender, err_msg
   end
-
-  text = text_part.body.to_s
 
   # Construct this JSON:
   #   {"status":{"body":#{raw_body},"signature":#{signature}}}
