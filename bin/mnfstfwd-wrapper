@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# The sed(1) is only needed until this is merged:
+# http://marc.info/?l=openbsd-tech&m=142819317808612&w=2
+sed \
+  -e 's/\(Received: .*\)\;/\1/' \
+  -e 's/\(      by .*\)\;/\1/' \
+  -e 's/\(      TLS .*\)\;/\1/' | \
+(cd /home/mike/mnfstfwd && \
+  env MNFST_GNUPGHOME=/tmp/mnfst-gpghome \
+      MNFST_SERVER=www.mnfst.io \
+      MNFST_PORT=443 MNFST_TLS=true \
+  bundle exec ./bin/mnfstfwd)
